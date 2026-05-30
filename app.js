@@ -25,6 +25,10 @@ app.use('/api-prestamos/roles', rolesRoute);
 app.use('/api-prestamos/systemUsers', systemUsersRoute);
 
 // Health check
+app.get('/', (req, res) => {
+  res.json({ status: 'OK', message: 'Prestamos Backend API' });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
