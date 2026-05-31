@@ -1,17 +1,78 @@
 require('dotenv').config();
-const { Pool } = require('pg');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+let pool;
+let usePostgres = false;
+
+if (process.env.DATABASE_URL) {
+  const { Pool } = require('pg');
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: { rejectUnauthorized: false },
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+  });
+  usePostgres = true;
+} else {
+  const Database = require('better-sqlite3');
+  const path = require('path');
+  const db = new Database(path.join(__dirname, 'prestamos.db'));
+  
+  pool = {
+    query: (sql, params = []) => {
+      try {
+        let sqlite_sql = sql
+          .replace(/\$(\d+)/g, '?')
+          .replace(/SERIAL PRIMARY KEY/g, 'INTEGER PRIMARY KEY AUTOINCREMENT')
+          .replace(/UUID PRIMARY KEY DEFAULT gen_random_uuid\(\)/g, 'TEXT PRIMARY KEY')
+          .replace(/TEXT UNIQUE NOT NULL/g, 'TEXT UNIQUE NOT NULL')
+          .replace(/TIMESTAMP DEFAULT now\(\)/g, 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP')
+          .replace(/BOOLEAN DEFAULT true/g, 'BOOLEAN DEFAULT 1')
+          .replace(/DEFAULT '?\[\]'?/g, "DEFAULT '[]'")
+          .replace(/JSONB/g, 'TEXT')
+          .replace(/ON DELETE CASCADE/g, 'ON DELETE CASCADE');
+
+        const isSelect = /^\s*SELECT/i.test(sqlite_sql);
+        const stmt = db.prepare(sqlite_sql);
+        
+        let result;
+        if (isSelect) {
+          result = stmt.all(...params);
+        } else {
+          const info = stmt.run(...params);
+          result = [{ lastID: info.lastInsertRowid }];
+        }
+        
+        return Promise.resolve({ rows: result, rowCount: result.length });
+      } catch (err) {
+        console.error('SQLite error:', err.message, 'SQL:', sql);
+        return Promise.reject(err);
+      }
+    },
+    end: () => {
+      db.close();
+      return Promise.resolve();
+    }
+  };
+}
+
+function generateUUID() {
+  return crypto.randomUUID();
+}
 
 async function run() {
   try {
-    // Create extension and tables if not exists
-    await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+    console.log('🌱 Starting seed...');
+
+    if (usePostgres) {
+      await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto";`);
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS system_users (
-        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        id ${usePostgres ? 'UUID PRIMARY KEY DEFAULT gen_random_uuid()' : 'TEXT PRIMARY KEY'},
         username TEXT UNIQUE NOT NULL,
         email TEXT UNIQUE NOT NULL,
         password TEXT NOT NULL,
@@ -20,7 +81,7 @@ async function run() {
         phone TEXT,
         department TEXT,
         active BOOLEAN DEFAULT true,
-        created_at TIMESTAMP DEFAULT now()
+        created_at TIMESTAMP DEFAULT ${usePostgres ? 'now()' : 'CURRENT_TIMESTAMP'}
       );
     `);
 
@@ -29,25 +90,28 @@ async function run() {
         id SERIAL PRIMARY KEY,
         name TEXT,
         type TEXT,
-        created_at TIMESTAMP DEFAULT now()
+        created_at TIMESTAMP DEFAULT ${usePostgres ? 'now()' : 'CURRENT_TIMESTAMP'}
       );
     `);
 
-    // Ensure permissions column exists (for older schemas)
-    await pool.query(`ALTER TABLE roles ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '[]';`);
+    if (usePostgres) {
+      await pool.query(`ALTER TABLE roles ADD COLUMN IF NOT EXISTS permissions JSONB DEFAULT '[]';`);
+    } else {
+      try {
+        await pool.query(`ALTER TABLE roles ADD COLUMN permissions TEXT DEFAULT '[]';`);
+      } catch (e) {
+        // Column might already exist
+      }
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_roles (
         id SERIAL PRIMARY KEY,
-        user_id UUID REFERENCES system_users(id) ON DELETE CASCADE,
+        user_id ${usePostgres ? 'UUID' : 'TEXT'} REFERENCES system_users(id) ON DELETE CASCADE,
         role_id INT REFERENCES roles(id) ON DELETE CASCADE
       );
     `);
 
-    // Seed admin role
-    const roleRes = await pool.query(`SELECT id FROM roles WHERE type = $1 LIMIT 1`, ['admin']);
-    let roleId;
-    
     const perms = JSON.stringify([
       { action: 'read', subject: 'main' },
       { action: 'read', subject: 'dashboard' },
@@ -71,43 +135,67 @@ async function run() {
       { action: 'update', subject: 'alertas' },
       { action: 'delete', subject: 'alertas' }
     ]);
+
+    const roleRes = await pool.query(`SELECT id FROM roles WHERE type = ?`, ['admin']);
+    let roleId;
     
     if (roleRes.rows.length === 0) {
-      const insertRole = await pool.query(`INSERT INTO roles (name, type, permissions) VALUES ($1,$2,$3) RETURNING id`, ['Admin','admin',perms]);
-      roleId = insertRole.rows[0].id;
+      const insertRole = await pool.query(
+        `INSERT INTO roles (name, type, permissions) VALUES (?, ?, ?)`,
+        ['Admin', 'admin', perms]
+      );
+      roleId = insertRole.rows[0]?.id || 1;
     } else {
       roleId = roleRes.rows[0].id;
-      // Update existing role with new permissions
-      await pool.query(`UPDATE roles SET permissions = $1 WHERE id = $2`, [perms, roleId]);
+      await pool.query(`UPDATE roles SET permissions = ? WHERE id = ?`, [perms, roleId]);
     }
 
-    // Seed admin user
     const adminEmail = process.env.ADMIN_EMAIL || 'admin@prestamos.com';
-    const adminUser = await pool.query(`SELECT id FROM system_users WHERE email = $1 LIMIT 1`, [adminEmail]);
+    const adminUser = await pool.query(`SELECT id FROM system_users WHERE email = ?`, [adminEmail]);
 
     let userId;
     if (adminUser.rows.length === 0) {
       const plain = process.env.ADMIN_PASSWORD || 'admin123';
       const hash = await bcrypt.hash(plain, 10);
+      const newUserId = generateUUID();
+      
       const createUser = await pool.query(
-        `INSERT INTO system_users (username,email,password,name,active) VALUES ($1,$2,$3,$4,true) RETURNING id`,
-        ['admin', adminEmail, hash, 'Administrador']
+        usePostgres 
+          ? `INSERT INTO system_users (username,email,password,name,active) VALUES ($1,$2,$3,$4,true) RETURNING id`
+          : `INSERT INTO system_users (id, username,email,password,name,active) VALUES (?, ?, ?, ?, ?, 1)`,
+        usePostgres 
+          ? ['admin', adminEmail, hash, 'Administrador']
+          : [newUserId, 'admin', adminEmail, hash, 'Administrador']
       );
-      userId = createUser.rows[0].id;
+      userId = usePostgres ? createUser.rows[0].id : newUserId;
+      
+      console.log('✅ Seed completed!');
+      console.log('   Admin email:', adminEmail);
+      console.log('   Admin password:', plain);
+      console.log('   Database:', usePostgres ? 'PostgreSQL' : 'SQLite');
     } else {
       userId = adminUser.rows[0].id;
+      console.log('✅ Seed completed!');
+      console.log('   Admin email:', adminEmail);
+      console.log('   Database:', usePostgres ? 'PostgreSQL' : 'SQLite');
     }
 
-    // Link user to role
-    const link = await pool.query(`SELECT 1 FROM user_roles WHERE user_id = $1 AND role_id = $2 LIMIT 1`, [userId, roleId]);
+    const link = await pool.query(
+      `SELECT 1 FROM user_roles WHERE user_id = ? AND role_id = ? LIMIT 1`,
+      [userId, roleId]
+    );
+    
     if (link.rows.length === 0) {
-      await pool.query(`INSERT INTO user_roles (user_id, role_id) VALUES ($1,$2)`, [userId, roleId]);
+      await pool.query(
+        `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
+        [userId, roleId]
+      );
     }
 
-    console.log('✅ Seed completed. Admin user:', adminEmail, '(use ADMIN_PASSWORD env to change)');
+    await pool.end?.();
     process.exit(0);
   } catch (e) {
-    console.error('Seed error', e);
+    console.error('❌ Seed error:', e.message);
     process.exit(1);
   }
 }
