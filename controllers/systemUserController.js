@@ -100,6 +100,7 @@ function systemUserController() {
         data: result
       });
     } catch (e) {
+      console.error('Login error details:', e);
       res.status(500).json({
         success: false,
         message: e.message,
