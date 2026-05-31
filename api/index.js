@@ -1,5 +1,5 @@
 require('dotenv').config();
-const pool = require('../config/pgConnection');
+const pool = require('../config/dbConnection');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
