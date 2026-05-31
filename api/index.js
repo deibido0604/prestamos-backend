@@ -1,7 +1,4 @@
 require('dotenv').config();
-const pool = require('../config/dbConnection');
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const express = require('express');
 
@@ -10,14 +7,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health check
+// Load database connection (may fail if DATABASE_URL not set)
+let pool;
+try {
+  pool = require('../config/dbConnection');
+} catch (err) {
+  console.error('Warning: Failed to load database connection:', err.message);
+  pool = null;
+}
+
+// Health check - works always
 app.get('/', (req, res) => {
-  res.json({ status: 'OK', message: 'Prestamos Backend API' });
+  res.json({ status: 'OK', message: 'Prestamos Backend API - Healthy!' });
 });
 
 // Login
 app.post('/api-prestamos/systemUsers/login', async (req, res) => {
   try {
+    if (!pool) {
+      return res.status(503).json({
+        success: false,
+        message: 'Database not configured',
+        code: 503
+      });
+    }
+
+    const bcrypt = require('bcryptjs');
+    const jwt = require('jsonwebtoken');
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -74,7 +90,7 @@ app.post('/api-prestamos/systemUsers/login', async (req, res) => {
         username: user.username,
         roles: rolesWithPermissions
       },
-      process.env.JWT_SECRET,
+      process.env.JWT_SECRET || 'secret',
       { expiresIn: '24h' }
     );
 

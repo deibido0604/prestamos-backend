@@ -1,8 +1,8 @@
-const isDev = process.env.NODE_ENV !== 'production';
+const isDev = process.env.NODE_ENV !== 'production' && !process.env.DATABASE_URL;
 
 let pool;
 
-if (isDev && !process.env.DATABASE_URL) {
+if (isDev) {
   // Use SQLite for local development without DATABASE_URL
   const Database = require('better-sqlite3');
   const path = require('path');
@@ -39,14 +39,6 @@ if (isDev && !process.env.DATABASE_URL) {
 
         const isSelect = /^\s*SELECT/i.test(sqlite_sql);
         
-        // Log for debugging
-        if (originalSql.includes('SELECT') && originalSql.includes('system_users')) {
-          console.log('[SQLite] Original:', originalSql.substring(0, 80) + '...');
-          console.log('[SQLite] Converted:', sqlite_sql.substring(0, 80) + '...');
-          console.log('[SQLite] Original Params:', params);
-          console.log('[SQLite] Expanded Params:', expandedParams);
-        }
-        
         const stmt = db.prepare(sqlite_sql);
         
         let result = [];
@@ -79,15 +71,27 @@ if (isDev && !process.env.DATABASE_URL) {
 } else {
   // Use PostgreSQL
   const { Pool } = require('pg');
-  pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false },
-    max: 20,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000,
-  });
   
-  console.log('✅ Using PostgreSQL');
+  if (!process.env.DATABASE_URL) {
+    console.warn('⚠️  WARNING: DATABASE_URL not set. Database will not work.');
+    // Return a mock pool for graceful failure
+    pool = {
+      query: async () => {
+        throw new Error('DATABASE_URL not configured');
+      },
+      end: async () => {}
+    };
+  } else {
+    pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+    
+    console.log('✅ Using PostgreSQL');
+  }
 }
 
 module.exports = pool;
