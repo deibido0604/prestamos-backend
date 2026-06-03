@@ -1,47 +1,54 @@
-const nodemailer = require('nodemailer');
+const { Resend } = require('resend');
 
-let transporter = null;
+let resend = null;
 
-const getTransporter = () => {
-  if (!transporter) {
-    const user = process.env.MAILTRAP_USER;
-    const pass = process.env.MAILTRAP_PASS;
+const getResend = () => {
+  if (!resend) {
+    const apiKey = process.env.RESEND_API_KEY;
     
-    console.log('🔍 DEBUG - Cargando Mailtrap:');
-    console.log('   MAILTRAP_USER:', user ? '✅ CARGADO' : '❌ VACÍO');
-    console.log('   MAILTRAP_PASS:', pass ? '✅ CARGADO' : '❌ VACÍO');
+    console.log('🔍 DEBUG - Cargando Resend:');
+    console.log('   RESEND_API_KEY:', apiKey ? '✅ CARGADO' : '❌ VACÍO');
     
-    if (!user || !pass) {
-      console.warn('⚠️  MAILTRAP_USER o MAILTRAP_PASS no configurados');
+    if (!apiKey) {
+      console.warn('⚠️  RESEND_API_KEY no configurado');
       return null;
     }
     
-    transporter = nodemailer.createTransport({
-      host: 'sandbox.smtp.mailtrap.io',
-      port: 2525,
-      auth: { user, pass },
-    });
-    console.log('✅ Transporter creado exitosamente');
+    resend = new Resend(apiKey);
+    console.log('✅ Resend inicializado exitosamente');
   }
-  return transporter;
+  return resend;
 };
 
 const sendEmail = async (to, subject, html) => {
   try {
     console.log('📧 Intentando enviar email a:', to);
-    const transport = getTransporter();
-    if (!transport) {
-      throw new Error('Email service no configurado - variables MAILTRAP faltantes');
+    const resendInstance = getResend();
+    if (!resendInstance) {
+      throw new Error('Email service no configurado - RESEND_API_KEY faltante');
+    }
+
+    // Si FORCE_TEST_EMAIL=true, fuerza el destinatario a TEST_EMAIL (útil para pruebas)
+    const forceTest = process.env.FORCE_TEST_EMAIL === 'true';
+    const testEmail = process.env.TEST_EMAIL || 'davidjared1104@gmail.com';
+    const recipient = forceTest ? testEmail : to;
+
+    const fromEmail = process.env.FROM_EMAIL || 'no-reply@prestamos.com';
+
+    const result = await resendInstance.emails.send({
+      from: `Sistema Préstamos <${fromEmail}>`,
+      to: recipient,
+      subject,
+      html: `<p><strong>Para:</strong> ${recipient}</p>${html}`,
+    });
+    
+    if (result.error) {
+      throw new Error(result.error.message);
     }
     
-    const info = await transport.sendMail({
-      from: '"Sistema Préstamos" <noreply@prestamos.com>',
-      to,
-      subject,
-      html,
-    });
-    console.log(`✅ Email REALMENTE enviado a ${to} (Message ID: ${info.messageId})`);
-    return info;
+    console.log(`✅ Email enviado a ${recipient} (ID: ${result.data.id})`);
+    if (forceTest) console.log(`   (Destinatario original era: ${to})`);
+    return result.data;
   } catch (error) {
     console.error('❌ Error enviando email:', error.message);
     throw error;
