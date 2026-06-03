@@ -19,18 +19,44 @@ app.use(bearerToken());
 const permissionRoute = require('./routes/permissionRoute');
 const rolesRoute = require('./routes/rolesRoute');
 const systemUsersRoute = require('./routes/systemUsersRoute');
+const alertasRoute = require('./routes/alertasRoute');   // <-- nueva ruta
 
 app.use('/api-prestamos/permission', permissionRoute);
 app.use('/api-prestamos/roles', rolesRoute);
 app.use('/api-prestamos/systemUsers', systemUsersRoute);
+app.use('/api-prestamos/alertas', alertasRoute);          // <-- montar alertas
 
 // Health check
 app.get('/', (req, res) => {
   res.json({ status: 'OK', message: 'Prestamos Backend API' });
 });
-
 app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
-module.exports = app;
+// ========================
+// LISTADO DINÁMICO DE RUTAS
+// ========================
+const getRoutes = (stack, basePath = '') => {
+  let routes = [];
+  for (const layer of stack) {
+    if (layer.route) {
+      const methods = Object.keys(layer.route.methods).join(',').toUpperCase();
+      routes.push(`${methods} ${basePath}${layer.route.path}`);
+    } else if (layer.name === 'router' && layer.handle.stack) {
+      let newBasePath = basePath;
+      if (layer.regexp.source !== '^\\/?(?=\\/|$)') {
+        const pathPart = layer.regexp.source
+          .replace(/\\\/?/g, '/')
+          .replace(/\^|\$|\?|\?i|\\(?=[\/])/g, '')
+          .replace(/\(\?:\(\[\^\\\/\]\+\?\)\)/g, ':param');
+        newBasePath += pathPart;
+      }
+      routes = routes.concat(getRoutes(layer.handle.stack, newBasePath));
+    }
+  }
+  return routes;
+};
+
+const routesList = getRoutes(app._router.stack);
+module.exports = { app, routesList };
