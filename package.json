@@ -9,6 +9,7 @@
     "build": "npm install"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.10.0",
     "connect-timeout": "^1.9.0",
@@ -29,7 +30,8 @@
     "morgan": "^1.10.0",
     "nocache": "^3.0.4",
     "nodemailer": "^8.0.10",
-    "pg": "^8.11.3"
+    "pg": "^8.11.3",
+    "resend": "^6.12.4"
   },
   "devDependencies": {
     "nodemon": "^2.0.22"
