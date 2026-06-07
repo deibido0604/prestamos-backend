@@ -26,7 +26,7 @@ app.use('/api-prestamos/permission', permissionRoute);
 app.use('/api-prestamos/roles', rolesRoute);
 app.use('/api-prestamos/systemUsers', systemUsersRoute);
 app.use('/api-prestamos/alertas', alertasRoute);          // <-- montar alertas
-app.use('/api-prestamos/clients', clientsRoute); // clientes endpoints
+app.use('/api-prestamos/clientes', clientsRoute); // clientes endpoints
 
 // Health check
 app.get('/', (req, res) => {
