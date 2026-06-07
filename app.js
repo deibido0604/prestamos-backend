@@ -19,7 +19,7 @@ app.use(bearerToken());
 const permissionRoute = require('./routes/permissionRoute');
 const rolesRoute = require('./routes/rolesRoute');
 const systemUsersRoute = require('./routes/systemUsersRoute');
-const alertasRoute = require('./routes/alertasRoute');   // <-- nueva ruta
+const alertasRoute = require('./routes/alertasRoute');
 const clientsRoute = require('./routes/clientsRoute');
 
 app.use('/api-prestamos/permission', permissionRoute);
