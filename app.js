@@ -36,6 +36,10 @@ app.get('/health', (req, res) => {
   res.json({ status: 'OK' });
 });
 
+app.get('/api-prestamos/prueba', (req, res) => {
+  res.json({ mensaje: 'Ruta de prueba funcionando' });
+});
+
 // ========================
 // LISTADO DINÁMICO DE RUTAS
 // ========================
