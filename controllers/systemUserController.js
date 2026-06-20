@@ -29,7 +29,7 @@ function systemUserController() {
     try {
       const { username, email, password, name, lastName, phone, department, active } = req.body;
 
-      if (!username || !email || !password) {
+      if (!email || !password) {
         return res.status(400).json({
           success: false,
           message: 'Faltan campos requeridos',
