@@ -73,9 +73,26 @@ function systemUserService() {
 
   async function createSystemUser(param) {
     try {
+      // Generar username desde nombre + prefijo del correo si no viene
+      let username = param.username;
+      if (!username) {
+        const namePart = (param.name || '').toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '');
+        const emailPrefix = param.email.split('@')[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+        const base = namePart || emailPrefix;
+        // Asegurar unicidad con sufijo numérico si ya existe
+        let candidate = base;
+        let suffix = 1;
+        while (true) {
+          const exists = await pool.query('SELECT id FROM system_users WHERE username = $1', [candidate]);
+          if (!exists.rows.length) break;
+          candidate = `${base}${suffix++}`;
+        }
+        username = candidate;
+      }
+
       const existing = await pool.query(
         `SELECT id FROM system_users WHERE username = $1 OR email = $2`,
-        [param.username.toLowerCase(), param.email.toLowerCase()]
+        [username.toLowerCase(), param.email.toLowerCase()]
       );
 
       if (existing.rows.length) {
@@ -83,20 +100,13 @@ function systemUserService() {
       }
 
       const hashed = await bcrypt.hash(param.password, 10);
-      // full_name = name + lastName combinados
       const fullName = [param.name, param.lastName].filter(Boolean).join(' ') || param.name || '';
 
       const result = await pool.query(
         `INSERT INTO system_users (username, email, password, full_name, active)
          VALUES ($1, $2, $3, $4, $5)
          RETURNING id, username, email, full_name, active`,
-        [
-          param.username.toLowerCase(),
-          param.email.toLowerCase(),
-          hashed,
-          fullName,
-          param.active ?? true,
-        ]
+        [username.toLowerCase(), param.email.toLowerCase(), hashed, fullName, param.active ?? true]
       );
 
       return result.rows[0];
