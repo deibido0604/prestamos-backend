@@ -1,5 +1,22 @@
 const pool = require('../config/dbConnection');
 
+const isDev = process.env.NODE_ENV !== 'production' && !process.env.DATABASE_URL;
+if (isDev) {
+  pool.query(`
+    CREATE TABLE IF NOT EXISTS alertas (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      evento TEXT,
+      destinatarios TEXT,
+      activo INTEGER DEFAULT 1,
+      plantilla TEXT,
+      frecuencia TEXT DEFAULT 'diaria',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `).catch(console.error);
+}
+
 exports.getAll = async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM alertas ORDER BY id');

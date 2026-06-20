@@ -1,5 +1,27 @@
 const pool = require('../config/dbConnection');
 
+const isDev = process.env.NODE_ENV !== 'production' && !process.env.DATABASE_URL;
+if (isDev) {
+  pool.query(`
+    CREATE TABLE IF NOT EXISTS clients (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombrecompleto TEXT NOT NULL,
+      cedula TEXT,
+      correo TEXT,
+      telefono TEXT,
+      telefonosecundario TEXT,
+      direccion TEXT,
+      profesion TEXT,
+      lugartrabajo TEXT,
+      antiguedad TEXT,
+      referencias TEXT,
+      estado TEXT DEFAULT 'activo',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `).catch(console.error);
+}
+
 const mapRow = (r) => ({
   id: r.id,
   nombrecompleto: r.nombrecompleto,

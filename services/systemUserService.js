@@ -1,6 +1,39 @@
 const pool = require('../config/dbConnection');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+const isDev = process.env.NODE_ENV !== 'production' && !process.env.DATABASE_URL;
+
+// Crear tablas en SQLite local si no existen
+const initResetTable = async () => {
+  if (!isDev) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS system_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password TEXT NOT NULL,
+      name TEXT,
+      last_name TEXT,
+      phone TEXT,
+      department TEXT,
+      active INTEGER DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at DATETIME NOT NULL,
+      used INTEGER DEFAULT 0
+    )
+  `);
+};
+initResetTable().catch(console.error);
 
 function systemUserService() {
 
@@ -50,21 +83,19 @@ function systemUserService() {
       }
 
       const hashed = await bcrypt.hash(param.password, 10);
+      // full_name = name + lastName combinados
+      const fullName = [param.name, param.lastName].filter(Boolean).join(' ') || param.name || '';
 
       const result = await pool.query(
-        `INSERT INTO system_users 
-        (username,email,password,name,last_name,phone,department,active)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-        RETURNING id, username, email, name, last_name, active`,
+        `INSERT INTO system_users (username, email, password, full_name, active)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, username, email, full_name, active`,
         [
           param.username.toLowerCase(),
           param.email.toLowerCase(),
           hashed,
-          param.name,
-          param.lastName,
-          param.phone,
-          param.department,
-          param.active ?? true
+          fullName,
+          param.active ?? true,
         ]
       );
 
@@ -130,10 +161,115 @@ function systemUserService() {
     }
   }
 
+  // dentro de systemUserService(), después de loginSystemUser
+
+  async function updateSystemUser(id, updates) {
+    try {
+      const { name, lastName, phone, active } = updates;
+      const fullName = [name, lastName].filter(Boolean).join(' ') || name || undefined;
+      const result = await pool.query(
+        `UPDATE system_users 
+         SET full_name = COALESCE($1, full_name),
+             active    = COALESCE($2, active),
+             updated_at = NOW()
+         WHERE id = $3
+         RETURNING id, username, email, full_name, active, created_at, updated_at`,
+        [fullName ?? null, active ?? null, id]
+      );
+      if (result.rows.length === 0) return { code: 404, message: 'Usuario no encontrado' };
+      return result.rows[0];
+    } catch (e) {
+      console.error(e);
+      return { code: 500, message: e.message };
+    }
+  }
+
+  async function deleteSystemUser(id) {
+    try {
+      const result = await pool.query('DELETE FROM system_users WHERE id = $1 RETURNING id', [id]);
+      if (result.rows.length === 0) return { code: 404, message: 'Usuario no encontrado' };
+      return { success: true };
+    } catch (e) {
+      console.error(e);
+      return { code: 500, message: e.message };
+    }
+  }
+
+  async function generateResetToken(userId) {
+    try {
+      const user = await pool.query('SELECT id, email FROM system_users WHERE id = $1', [userId]);
+      if (!user.rows.length) return { code: 404, message: 'Usuario no encontrado' };
+
+      // Invalidar tokens anteriores
+      await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+
+      const token = crypto.randomBytes(32).toString('hex');
+      // Expira en 1 hora
+      const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+      await pool.query(
+        `INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES ($1, $2, $3)`,
+        [userId, token, expiresAt]
+      );
+
+      return { token, expiresAt, email: user.rows[0].email };
+    } catch (e) {
+      console.error(e);
+      return { code: 500, message: e.message };
+    }
+  }
+
+  async function resetPassword(token, newPassword) {
+    try {
+      const result = await pool.query(
+        `SELECT * FROM password_reset_tokens WHERE token = $1 AND used = FALSE`,
+        [token]
+      );
+
+      if (!result.rows.length) return { code: 400, message: 'Token inválido o ya utilizado' };
+
+      const record = result.rows[0];
+      if (new Date(record.expires_at) < new Date()) {
+        return { code: 400, message: 'El token ha expirado' };
+      }
+
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await pool.query('UPDATE system_users SET password = $1 WHERE id = $2', [hashed, record.user_id]);
+      await pool.query('UPDATE password_reset_tokens SET used = TRUE WHERE token = $1', [token]);
+
+      return { success: true };
+    } catch (e) {
+      console.error(e);
+      return { code: 500, message: e.message };
+    }
+  }
+
+  async function validateResetToken(token) {
+    try {
+      const result = await pool.query(
+        `SELECT prt.*, su.email, su.username FROM password_reset_tokens prt
+         JOIN system_users su ON su.id = prt.user_id
+         WHERE prt.token = $1 AND prt.used = FALSE`,
+        [token]
+      );
+      if (!result.rows.length) return { code: 400, message: 'Token inválido' };
+      const record = result.rows[0];
+      if (new Date(record.expires_at) < new Date()) return { code: 400, message: 'Token expirado' };
+      return { valid: true, email: record.email, username: record.username };
+    } catch (e) {
+      return { code: 500, message: e.message };
+    }
+  }
+
   return {
     getAllSystemUsers,
     createSystemUser,
-    loginSystemUser
+    loginSystemUser,
+    updateSystemUser,
+    deleteSystemUser,
+    generateResetToken,
+    resetPassword,
+    validateResetToken,
   };
 }
 
