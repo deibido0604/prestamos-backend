@@ -56,11 +56,14 @@ function systemUserController() {
         });
       }
 
+      // Generar token de primer acceso y enviar correo de bienvenida
+      const resetResult = await systemUserService.generateResetToken(result.id, true);
+
       res.json({
         success: true,
         message: 'Usuario creado',
         code: 200,
-        data: result
+        data: { ...result, resetToken: resetResult.token }
       });
     } catch (e) {
       res.status(500).json({

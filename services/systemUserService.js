@@ -205,16 +205,14 @@ function systemUserService() {
     }
   }
 
-  async function generateResetToken(userId) {
+  async function generateResetToken(userId, isNewUser = false) {
     try {
-      const user = await pool.query('SELECT id, email FROM system_users WHERE id = $1', [userId]);
+      const user = await pool.query('SELECT id, email, full_name, username FROM system_users WHERE id = $1', [userId]);
       if (!user.rows.length) return { code: 404, message: 'Usuario no encontrado' };
 
-      // Invalidar tokens anteriores
       await pool.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
 
       const token = crypto.randomBytes(32).toString('hex');
-      // Expira en 1 hora
       const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
 
       await pool.query(
@@ -222,7 +220,41 @@ function systemUserService() {
         [userId, token, expiresAt]
       );
 
-      return { token, expiresAt, email: user.rows[0].email };
+      // Enviar correo
+      const { email, full_name, username } = user.rows[0];
+      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+      const resetUrl = `${frontendUrl}/auth/reset-password?token=${token}`;
+      const displayName = full_name || username || email;
+
+      try {
+        const { sendEmail } = require('./emailService');
+        const subject = isNewUser
+          ? 'Bienvenido — Establece tu contraseña'
+          : 'Restablecimiento de contraseña';
+
+        const html = isNewUser
+          ? `
+            <h2>¡Bienvenido al Sistema de Préstamos, ${displayName}!</h2>
+            <p>Tu cuenta ha sido creada. Haz clic en el siguiente enlace para establecer tu contraseña:</p>
+            <p><a href="${resetUrl}" style="background:#1677ff;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;display:inline-block;">Establecer contraseña</a></p>
+            <p>Este enlace expira en <strong>1 hora</strong>.</p>
+            <p>Si no esperabas este correo, ignóralo.</p>
+          `
+          : `
+            <h2>Restablecimiento de contraseña</h2>
+            <p>Hola ${displayName}, recibiste este correo porque se solicitó restablecer tu contraseña.</p>
+            <p><a href="${resetUrl}" style="background:#1677ff;color:#fff;padding:10px 20px;border-radius:4px;text-decoration:none;display:inline-block;">Restablecer contraseña</a></p>
+            <p>Este enlace expira en <strong>1 hora</strong>.</p>
+            <p>Si no solicitaste esto, ignora este correo.</p>
+          `;
+
+        await sendEmail(email, subject, html);
+      } catch (emailErr) {
+        // No fallar si el correo no se puede enviar — el token sigue siendo válido
+        console.error('⚠️  Email no enviado:', emailErr.message);
+      }
+
+      return { token, expiresAt, email };
     } catch (e) {
       console.error(e);
       return { code: 500, message: e.message };
