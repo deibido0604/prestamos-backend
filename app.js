@@ -21,12 +21,16 @@ const rolesRoute = require('./routes/rolesRoute');
 const systemUsersRoute = require('./routes/systemUsersRoute');
 const alertasRoute = require('./routes/alertasRoute');
 const clientsRoute = require('./routes/clientsRoute');
+const prestamosRoute = require('./routes/prestamosRoute');
+const abonosRoute = require('./routes/abonosRoute');
 
 app.use('/api-prestamos/permission', permissionRoute);
 app.use('/api-prestamos/roles', rolesRoute);
 app.use('/api-prestamos/systemUsers', systemUsersRoute);
-app.use('/api-prestamos/alertas', alertasRoute);          // <-- montar alertas
-app.use('/api-prestamos/clientes', clientsRoute); // clientes endpoints
+app.use('/api-prestamos/alertas', alertasRoute);
+app.use('/api-prestamos/clientes', clientsRoute);
+app.use('/api-prestamos/prestamos', prestamosRoute);
+app.use('/api-prestamos/abonos', abonosRoute);
 
 // Health check
 app.get('/', (req, res) => {

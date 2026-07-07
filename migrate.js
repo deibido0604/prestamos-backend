@@ -2,9 +2,7 @@ require('dotenv').config();
 const pool = require('./config/dbConnection');
 
 async function migrate() {
-  console.log('Ejecutando migraciones...');
 
-  // system_users
   await pool.query(`
     CREATE TABLE IF NOT EXISTS system_users (
       id SERIAL PRIMARY KEY,
@@ -20,9 +18,7 @@ async function migrate() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  console.log('✅ system_users');
 
-  // roles
   await pool.query(`
     CREATE TABLE IF NOT EXISTS roles (
       id SERIAL PRIMARY KEY,
@@ -33,9 +29,7 @@ async function migrate() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  console.log('✅ roles');
 
-  // user_roles
   await pool.query(`
     CREATE TABLE IF NOT EXISTS user_roles (
       user_id INTEGER NOT NULL REFERENCES system_users(id) ON DELETE CASCADE,
@@ -43,9 +37,7 @@ async function migrate() {
       PRIMARY KEY (user_id, role_id)
     )
   `);
-  console.log('✅ user_roles');
 
-  // permissions (catálogo)
   await pool.query(`
     CREATE TABLE IF NOT EXISTS permissions (
       id SERIAL PRIMARY KEY,
@@ -55,9 +47,7 @@ async function migrate() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  console.log('✅ permissions');
 
-  // Seed de permisos si está vacío
   const { rows } = await pool.query('SELECT COUNT(*) as total FROM permissions');
   if (parseInt(rows[0].total) === 0) {
     const defaults = [
@@ -74,10 +64,8 @@ async function migrate() {
         [resource, label]
       );
     }
-    console.log('✅ permissions seed');
   }
 
-  // password_reset_tokens
   await pool.query(`
     CREATE TABLE IF NOT EXISTS password_reset_tokens (
       id SERIAL PRIMARY KEY,
@@ -87,9 +75,7 @@ async function migrate() {
       used BOOLEAN DEFAULT FALSE
     )
   `);
-  console.log('✅ password_reset_tokens');
 
-  // clients
   await pool.query(`
     CREATE TABLE IF NOT EXISTS clients (
       id SERIAL PRIMARY KEY,
@@ -108,25 +94,62 @@ async function migrate() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  console.log('✅ clients');
 
-  // alertas
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS prestamos (
+      id SERIAL PRIMARY KEY,
+      cliente_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE RESTRICT,
+      monto NUMERIC(12,2) NOT NULL,
+      tasa_interes NUMERIC(5,2) NOT NULL,
+      plazo_meses INTEGER NOT NULL DEFAULT 3,
+      interes_total NUMERIC(12,2) NOT NULL,
+      total_pagar NUMERIC(12,2) NOT NULL,
+      cuota_mensual NUMERIC(12,2) NOT NULL,
+      concepto TEXT,
+      estado VARCHAR(20) DEFAULT 'activo',
+      fecha_inicio DATE NOT NULL,
+      fecha_vencimiento DATE NOT NULL,
+      renovacion_de INTEGER REFERENCES prestamos(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS alertas (
       id SERIAL PRIMARY KEY,
       nombre TEXT NOT NULL,
       evento TEXT,
-      destinatarios TEXT,
+      destinatarios TEXT[] DEFAULT ARRAY[]::TEXT[],
       activo BOOLEAN DEFAULT TRUE,
       plantilla TEXT,
       frecuencia TEXT DEFAULT 'diaria',
+      prestamo_id INTEGER REFERENCES prestamos(id) ON DELETE CASCADE,
+      fecha DATE,
+      cuota INTEGER,
+      total_cuotas INTEGER,
+      leido BOOLEAN DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW()
     )
   `);
-  console.log('✅ alertas');
+  await pool.query(`ALTER TABLE alertas ADD COLUMN IF NOT EXISTS prestamo_id INTEGER REFERENCES prestamos(id) ON DELETE CASCADE`);
+  await pool.query(`ALTER TABLE alertas ADD COLUMN IF NOT EXISTS fecha DATE`);
+  await pool.query(`ALTER TABLE alertas ADD COLUMN IF NOT EXISTS cuota INTEGER`);
+  await pool.query(`ALTER TABLE alertas ADD COLUMN IF NOT EXISTS total_cuotas INTEGER`);
+  await pool.query(`ALTER TABLE alertas ADD COLUMN IF NOT EXISTS leido BOOLEAN DEFAULT FALSE`);
 
-  console.log('\n✅ Migración completada');
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS abonos (
+      id SERIAL PRIMARY KEY,
+      prestamo_id INTEGER NOT NULL REFERENCES prestamos(id) ON DELETE CASCADE,
+      monto NUMERIC(12,2) NOT NULL,
+      nota TEXT,
+      fecha DATE NOT NULL DEFAULT CURRENT_DATE,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+
   await pool.end();
   process.exit(0);
 }
